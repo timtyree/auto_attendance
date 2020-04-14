@@ -48,7 +48,7 @@ def get_roster_fn():
     assert(roster_fn is not None)
     return roster_fn.string
 
-def get_zoom_fn_list():
+def get_zoom_fn_list(zoom_dir = zoom_dir):
     os.chdir(zoom_dir)
     zoom_fn_list = []
     for string in os.listdir():
@@ -153,7 +153,9 @@ def get_attendence(df,
     time_thresh = 35,
     email_col = 'User Email',
     name_col = 'Name (Original Name)',
-    skiprows=2):
+    time_col = 'Total Duration (Minutes)',
+    skiprows=2,
+    use_prev_dict = True):
     '''
     get_attendence() converts Zoom attendence data to Canvas course roster data.
      attendence_dir is the relative directory holding only Zoom attendence 
@@ -173,20 +175,28 @@ def get_attendence(df,
     print(att_fns)
 
     d = pd.concat([pd.read_csv(fn, skiprows=skiprows) for fn in att_fns], sort=False)
-    d = d[d.index>0]#drop the TA in charge of discussion (assumed to be at index position 0)
+    #take the max time in discussion per student
+    name_lst = list(set(d[name_col].values))
+    tmp = pd.concat([d[d[name_col]== name].sort_values(time_col,ascending=False).head(1) for name in name_lst])
+    d = tmp.copy()
+    # d = d[d.index>0]#drop the TA in charge of discussion (assumed to be at index position 0)
     d.reindex()
 
     #import dictionary and update any student emails from Zoom contained therein
     os.chdir(data_dir)
-    if os.path.exists(dict_dir):
-        dse = pd.read_excel(dict_dir)
-        d3 = d.set_index(name_col, drop=False)
-        # d3[email_col] = dse.set_index(name_col)
-        for n,e in dse.values:
-            d3.loc[n,email_col] = e
-        d = d3.reset_index(drop=True).copy()
-        del d3, dse
-
+    try:
+        if os.path.exists(dict_dir) and use_prev_dict:
+            dse = pd.read_excel(dict_dir)
+            d3 = d.set_index(name_col, drop=False)
+            #trivial alternative
+            # d3[email_col] = dse.set_index(name_col)
+            for n,e in dse.values:
+                d3.loc[n,email_col] = e
+            d = d3.reset_index(drop=True).copy()
+            del d3, dse
+    except Exception:
+        print('Warning: \n\n\tsomeone changed their Zoom name, previous email dictionary not used. Update the dictionary and rerun ./get_attendence.sh')
+        use_prev_dict = False
     #take attendence 
     # for each student present for at least time_thresh=35 minutes, change their attendence to 1
     time_attended_col = d.columns[-1]
@@ -199,20 +209,23 @@ def get_attendence(df,
     out['Attendence'] = pd.Series(email_dict)
     match_no = len(out[~out['Attendence'].isna()])
     print(f"{match_no} students matched by email listed in Zoom.")
+    
+    ##Record the set of students not matched
+    #emails matched/not matched as true or false (--> attendence is NaN) according to Roster data
+    matched = set(out[~out['Attendence'].isna()].index)
+    not_matched = set(out[out['Attendence'].isna()].index)
+
     # set attendence values that are still NaN to zero
     out.loc[out['Attendence'].isna(),'Attendence'] = 0
     out['Attendence'] = out['Attendence'].astype('uint8')
 
     #save attendence sheet
     os.chdir(output_dir)
-    out = out.reset_index()[['Sec ID', 'PID', 'Student', 'Pronoun', 'Credits', 'College', 'Major', 'Level', 'Email', 'Attendence']]
-    out.to_excel(save_fn, index=False)
+    out_final = out.reset_index()[['Sec ID', 'PID', 'Student', 'Pronoun', 'Credits', 'College', 'Major', 'Level', 'Email', 'Attendence']]
+    out_final.to_excel(save_fn, index=False)
     os.chdir(nb_dir)
 
-    ##Record the set of students not matched
-    #emails matched/not matched as true or false (--> attendence is NaN) according to Roster data
-    matched = set(out[~out['Attendence'].isna()].index)
-    not_matched = set(out[out['Attendence'].isna()].index)
+
     #show students that attended but were not matched according to the Roster data
     # attended according to Zoom data
     d2 = d[d['Attendence']==1].set_index(email_col)
@@ -227,4 +240,4 @@ def get_attendence(df,
     out.loc[not_matched]['Student'].to_csv('students_not_matched_in_roster_dataset.csv', header=True)
     #save a list of students that attended the Zoom meeting that were not matched with a Roster email
     d2.set_index(name_col)[email_col].to_excel(dict_dir, header=True)
-    return out
+    return out, use_prev_dict
