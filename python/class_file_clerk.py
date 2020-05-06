@@ -35,7 +35,7 @@ def get_output_fn():
     save_fn = save_fn + '.xlsx'
     return save_fn
 
-def get_roster_fn():
+def get_roster_fn(roster_dir=roster_dir):
     os.chdir(roster_dir)
     fn_pattern = re.compile(f'''(
     [a-zA-Z0-9_%+-]+.xlsx
@@ -77,7 +77,7 @@ def add_section(sec_id, sec_code,
 
 def get_ta(
     fn  = "my_ta_list.csv"):
-    os.chdir(data_dir)
+    # os.chdir(data_dir)
     return pd.read_csv(fn)
 def add_ta(name, email, 
     fn  = "my_ta_list.csv"):
@@ -239,5 +239,6 @@ def get_attendence(df,
     os.chdir(data_dir)
     out.loc[not_matched]['Student'].to_csv('students_not_matched_in_roster_dataset.csv', header=True)
     #save a list of students that attended the Zoom meeting that were not matched with a Roster email
-    d2.set_index(name_col)[email_col].to_excel(dict_dir, header=True)
+    student_dict_updated = pd.concat([pd.read_excel(dict_dir).set_index(name_col)[email_col], d2.set_index(name_col)[email_col]], join='inner')
+    student_dict_updated.to_excel(dict_dir, header=True)
     return out, use_prev_dict
